@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    // 1. Users collection
+    match /users/{userId} {
+      // Anyone authenticated can read user profile (or restricted to self & admin)
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // User can create their own document on registration with default 'user' role
+      allow create: if isOwner(userId) &&
+        request.resource.data.role == 'user' &&
+        request.resource.data.uid == userId;
+
+      // User can update their own profile, but CANNOT elevate their own role
+      allow update: if isOwner(userId) &&
+        request.resource.data.role == resource.data.role;
+
+      // Admin can update any user (including roles)
+      allow update: if isAdmin();
+      
+      allow delete: if isAdmin();
+    }
+
+    // 2. Products collection
+    match /products/{productId} {
+      // Public read access to product catalog
+      allow read: if true;
+
+      // Only authorized admins can create, update, or delete products
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 3. Categories collection
+    match /categories/{categoryId} {
+      // Public read access
+      allow read: if true;
+
+      // Only admin can modify categories
+      allow write: if isAdmin();
+    }
+
+    // 4. Carts collection
+    match /carts/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    // 5. Wishlists collection
+    match /wishlists/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    // 6. Orders collection
+    match /orders/{orderId} {
+      // User can read their own orders; Admin can read all
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+
+      // Customer can create an order for themselves
+      allow create: if isAuthenticated() && (
+        request.resource.data.userId == request.auth.uid
+      );
+
+      // Status updates restricted to admin
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 7. Reviews collection
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // 8. Coupons collection
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 9. Addresses collection
+    match /addresses/{addressId} {
+      allow read, write: if isAuthenticated() && (
+        resource == null || resource.data.userId == request.auth.uid || isAdmin()
+      );
+    }
+  }
+}
